@@ -1,7 +1,59 @@
-from typing import Optional
+from typing import Optional, Any
 import argparse
 import json
+from pathlib import Path
+import yaml
+
 from .metadata import inspect_dimensions
+from .fetch import get_table_data
+
+
+def _load_config(path: str) -> dict[str, Any]:
+    p = Path(path)
+    if not p.exists():
+        raise SystemExit(f"Config file not found: {path}")
+    
+    suffix = p.suffix.lower()
+    if suffix in (".yaml", ".yml"):
+        with p.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+    elif suffix == ".json":
+        with p.open("r", encoding="utf-8") as f:
+            return json.load(f)
+    
+    raise SystemExit("Config must be .yaml/.yml or .json")
+
+
+def _fetch_data(args, cfg: dict[str: Any]) -> None:
+    query_spec = cfg.get("query")
+    if query_spec is None:
+        SystemExit("Config must include 'query'.")
+    
+    # Allow CLI overrides; fallback to config; else None (handled inside get_table_data)
+    start = args.start if args.start is not None else cfg.get("start_ref_period")
+    end = args.end if args.end is not None else cfg.get("end_ref_period")
+
+    df = get_table_data(
+        pid=cfg["pid"],
+        query_spec=query_spec,
+        start_ref_period=start,
+        end_ref_period=end
+    )
+
+    # Output handling
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        fmt = (args.format or out_path.suffix.lstrip(".").lower()).strip()
+        if fmt == "parquet":
+            df.to_parquet(out_path, index=False)
+        elif fmt == "csv":
+            df.to_csv(out_path, index=False)
+        else:
+            raise SystemExit("Unsupported output format. Use --format parquet|csv or a .parquet/.csv extension.")
+    else:
+        print(df.head(10).to_string(index=False))
 
 
 def _print_dimension_names(dims: dict) -> None:
@@ -39,7 +91,7 @@ def _print_dimension_values(
     if limit is not None:
         items = items[:limit]
 
-    print(f"# Dimension: {dim_name} (position {dims[dim_name]['position']})")
+    print(f"# Dimension: {dim_name} (pos: {dims[dim_name]['position']})")
     
     for member_name, member_id in items:
         print(f"{member_id}\t{member_name}")
@@ -78,13 +130,25 @@ def main(argv=None):
     p_json.add_argument("pid", help="StatCan productId (PID)")
     p_json.add_argument("--out", help="Write JSON to file instead of stdout")
 
+    # Download data
+    p_fetch = sub.add_parser("fetch", help="Fetch table data from YAML/JSON config")
+    p_fetch.add_argument("config", help="Path to config (.yaml/.yml/.json)")
+    p_fetch.add_argument("--start", help="Override start_ref_period (YYYY-MM-DD)")
+    p_fetch.add_argument("--end", help="Override end_ref_period (YYYY-MM-DD)")
+    p_fetch.add_argument("--out", help="Write results to file (csv/parquet). If omitted, prints a preview.")
+    p_fetch.add_argument("--format", choices=["csv", "parquet"], help="Output format (defaults from --out extension)")
+
     args = p.parse_args(argv)
 
-    dims = inspect_dimensions(args.pid)
+    if args.cmd == "fetch":
+        cfg = _load_config(args.config)
+        _fetch_data(args, cfg)
+    else:
+        dims = inspect_dimensions(args.pid)
 
-    if args.cmd == "dims":
-        _print_dimension_names(dims)
-    elif args.cmd == "values":
-        _print_dimension_values(dims, args.dim, args.pos, args.limit)
-    elif args.cmd == "dims-json":
-        _print_full_dimension_map(dims, args.out)
+        if args.cmd == "dims":
+            _print_dimension_names(dims)
+        elif args.cmd == "values":
+            _print_dimension_values(dims, args.dim, args.pos, args.limit)
+        elif args.cmd == "dims-json":
+            _print_full_dimension_map(dims, args.out)
