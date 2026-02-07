@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "statcan-wds"
+version = "0.1.0"
+description = "Metadata-driven Python client for querying Statistics Canada WDS using human-readable dimensions"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+authors = [
+  { name = "cdngouma" }
+]
+
+dependencies = [
+  "requests>=2.28",
+  "pandas>=1.5",
+  "numpy>=1.23.0"
+]
+
+[project.scripts]
+statcan-wds = "statcan_wds.cli:main"
+
+[tool.setuptools]
+packages = ["statcan_wds"]

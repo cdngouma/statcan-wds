@@ -1,0 +1,2 @@
+# StatCan WDS Tool
+A metadata-driven ingestion tool for high-dimensional statistical datasets that allows users to define filters using human-readable labels (YAML/JSON) instead of opaque API coordinates.
