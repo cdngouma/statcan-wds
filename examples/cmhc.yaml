@@ -1,0 +1,18 @@
+pid: "34100133"
+query:
+  - Geography:
+    - "Drummondville, Quebec"
+    - "Montréal, Quebec"
+    - "Ottawa-Gatineau, Quebec part, Ontario/Quebec"
+    - "Québec, Quebec"
+    - "Saguenay, Quebec"
+    - "Sherbrooke, Quebec"
+    - "Trois-Rivières, Quebec"
+  - "Type of structure": ["Row and apartment structures of three units and over"]
+  - "Type of unit":
+    - "Bachelor units"
+    - "One bedroom units"
+    - "Two bedroom units"
+    - "Three bedroom units"
+start_ref_period: "2020-01-01"
+end_ref_period: "2025-12-31"

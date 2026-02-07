@@ -1,0 +1,6 @@
+pid: "18100006"
+query:
+  - Geography: ["Canada"]
+  - "Products and product groups": "All-items"
+start_ref_period: "2024-01-01"
+end_ref_period: "2024-12-31"
