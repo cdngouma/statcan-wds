@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import yaml
 
-from .metadata import inspect_dimensions
+from .metadata import inspect_dimensions, get_cube_metatdata
 from .fetch import get_table_data
 
 
@@ -25,19 +25,19 @@ def _load_config(path: str) -> dict[str, Any]:
 
 
 def _fetch_data(args, cfg: dict[str: Any]) -> None:
-    query_spec = cfg.get("query")
+    query_spec = cfg.get("query", None)
     if query_spec is None:
         SystemExit("Config must include 'query'.")
     
     # Allow CLI overrides; fallback to config; else None (handled inside get_table_data)
-    start = args.start if args.start is not None else cfg.get("start_ref_period")
-    end = args.end if args.end is not None else cfg.get("end_ref_period")
+    start = args.start if args.start is not None else cfg.get("ref_start", None)
+    end = args.end if args.end is not None else cfg.get("ref_end", None)
 
     df = get_table_data(
         pid=cfg["pid"],
         query_spec=query_spec,
-        start_ref_period=start,
-        end_ref_period=end
+        ref_start=start,
+        ref_end=end
     )
 
     # Output handling
@@ -144,7 +144,8 @@ def main(argv=None):
         cfg = _load_config(args.config)
         _fetch_data(args, cfg)
     else:
-        dims = inspect_dimensions(args.pid)
+        metadata = get_cube_metatdata(args.pid)
+        dims = inspect_dimensions(args.pid, metadata)
 
         if args.cmd == "dims":
             _print_dimension_names(dims)

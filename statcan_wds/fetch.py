@@ -38,38 +38,29 @@ def _normalize_ref_period_range(ref_start: Optional[str], ref_end: Optional[str]
 def get_table_data(
     pid, 
     query_spec: dict, 
-    start_ref_period: Optional[str] = None,
-    end_ref_period: Optional[str] = None
+    ref_start: Optional[str] = None,
+    ref_end: Optional[str] = None
 ):
     """
     Fetch multiple StatCan series into a tidy DataFrame
     """
-
-    start_ref_period, end_ref_period = _normalize_ref_period_range(
-        start_ref_period, 
-        end_ref_period
-    )
-
     metadata = get_cube_metatdata(pid)
     coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
     vectors = resolve_vectors(pid, coordinates)
 
     vector_ids = ",".join(f'"{v}"' for v in vectors.keys())
 
+    ref_start = ref_start if ref_start else metadata["cubeStartDate"]
+    ref_end = ref_end if ref_end else metadata["cubeEndDate"]
+
     query = (
         f"getDataFromVectorByReferencePeriodRange"
         f"?vectorIds={vector_ids}"
-        f"&startRefPeriod={start_ref_period}"
-        f"&endReferencePeriod={end_ref_period}"
+        f"&startRefPeriod={ref_start}"
+        f"&endReferencePeriod={ref_end}"
     )
 
     data = get(query)
-
-    print("vectors::", vectors)
-
-    print("data::", data)
-
-    print("dim_map::", dim_map)
 
     final_df = []
 
@@ -82,16 +73,12 @@ def get_table_data(
         
         obj = series["object"]
         v_id = obj["vectorId"]
-
-        #index_cols = [list(d.keys())[0] for d in query_spec]
-        #index_cols.sort(key=lambda c: dim_map.get(c, float("inf")))
+        
         index_cols = list(dim_map.keys())
         index_cols.sort(key=lambda c: dim_map.get(c, float("inf")))
 
         index_vals = vectors[v_id].split(";")
         index = dict(zip(index_cols, index_vals))
-
-        print("---", index)
 
         for pt in obj["vectorDataPoint"]:
             final_df.append(
