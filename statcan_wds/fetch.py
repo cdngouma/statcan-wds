@@ -3,7 +3,9 @@ from datetime import date
 from typing import Optional
 import re
 from .client import get
-from .resolver import expand_specs, build_coordinates, resolve_vectors
+from .resolver import build_coordinates, resolve_vectors
+from .metadata import get_cube_metatdata
+from .errors import VectorDataPointError
 
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -48,30 +50,48 @@ def get_table_data(
         end_ref_period
     )
 
-    expanded = expand_specs(query_spec)
-    coordinates, dim_map = build_coordinates(pid, expanded)
+    metadata = get_cube_metatdata(pid)
+    coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
     vectors = resolve_vectors(pid, coordinates)
 
     vector_ids = ",".join(f'"{v}"' for v in vectors.keys())
 
-    data = get(
+    query = (
         f"getDataFromVectorByReferencePeriodRange"
         f"?vectorIds={vector_ids}"
         f"&startRefPeriod={start_ref_period}"
         f"&endReferencePeriod={end_ref_period}"
     )
 
+    data = get(query)
+
+    print("vectors::", vectors)
+
+    print("data::", data)
+
+    print("dim_map::", dim_map)
+
     final_df = []
 
     for series in data:
+        if series["status"] == "FAILED":
+            raise VectorDataPointError(
+                "Failed to retrieve vector data points: "
+                f"responseStatusCode: {series['object']['responseStatusCode']}"
+            )
+        
         obj = series["object"]
         v_id = obj["vectorId"]
 
-        index_cols = [list(d.keys())[0] for d in query_spec]
+        #index_cols = [list(d.keys())[0] for d in query_spec]
+        #index_cols.sort(key=lambda c: dim_map.get(c, float("inf")))
+        index_cols = list(dim_map.keys())
         index_cols.sort(key=lambda c: dim_map.get(c, float("inf")))
 
         index_vals = vectors[v_id].split(";")
         index = dict(zip(index_cols, index_vals))
+
+        print("---", index)
 
         for pt in obj["vectorDataPoint"]:
             final_df.append(

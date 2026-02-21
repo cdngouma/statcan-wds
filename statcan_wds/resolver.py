@@ -8,7 +8,7 @@ from .errors import (
 )
 
 
-def expand_specs(query_spec):
+def expand_specs(query_spec=[]):
     """
     Expand a compact spec into the cartesian product of choices.
     Example:
@@ -23,6 +23,9 @@ def expand_specs(query_spec):
             ...
         ]
     """
+    if not query_spec:
+        return []
+    
     pairs = []
     for dim in query_spec:
         (k,v), = dim.items()
@@ -38,15 +41,23 @@ def expand_specs(query_spec):
     ]
 
 
-def build_coordinates(pid, expanded_specs):
+def build_coordinates(pid, query_spec, metadata):
     """
     Map human-readable specs to WDS coordinate strings
     """
-    dims = inspect_dimensions(pid)
+    dims = inspect_dimensions(pid, metadata)
+    n_dims = len(dims)
 
-    coordinates = []
+    expanded_specs = expand_specs(query_spec)
+
+    if expanded_specs:
+        coordinates = []
+    else:
+        slots = ["1"] * n_dims + ["0"] * (10 - n_dims)
+        coordinates = [".".join(slots)]
+
     for series in expanded_specs:
-        slots = ["0"] * 10 # Coordinates have up to 10 slots
+        slots = ["1"] * n_dims + ["0"] * (10 - n_dims)
 
         for dim_name, member_name in series.items():
             dim = dims.get(dim_name)
@@ -83,7 +94,6 @@ def resolve_vectors(pid, coordinates):
     vec_map = {
         s["object"]["vectorId"]: s["object"]["SeriesTitleEn"]
         for s in series
-        if s["object"]["vectorId"] != 0
     }
 
     if not vec_map:

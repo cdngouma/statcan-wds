@@ -1,6 +1,7 @@
 from .client import get, post
 from .errors import MetadataError
 
+
 def get_cube_metatdata(pid):
     payload = [{"productId": pid}]
     data = post("getCubeMetadata", payload)
@@ -15,7 +16,7 @@ def get_cube_metatdata(pid):
     return item["object"]
 
 
-def inspect_dimensions(pid):
+def inspect_dimensions(pid, metadata):
     """
     Return dimension metadata as:
     {
@@ -25,8 +26,6 @@ def inspect_dimensions(pid):
         }
     }
     """
-    meta = get_cube_metatdata(pid)
-
     return {
         dim["dimensionNameEn"]: {
             "position": dim["dimensionPositionId"],
@@ -35,5 +34,5 @@ def inspect_dimensions(pid):
                 for m in dim["member"]
             }
         }
-        for dim in meta["dimension"]
+        for dim in metadata["dimension"]
     }

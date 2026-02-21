@@ -12,3 +12,6 @@ class InvalidMemberError(StatcanError):
 
 class InvalidCoordinateError(StatcanError):
     pass
+
+class VectorDataPointError(StatcanError):
+    pass
