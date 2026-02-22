@@ -24,20 +24,23 @@ def _load_config(path: str) -> dict[str, Any]:
     raise SystemExit("Config must be .yaml/.yml or .json")
 
 
-def _fetch_data(args, cfg: dict[str: Any]) -> None:
+def _fetch_data(args, cfg: dict[str, Any]) -> None:
+    pid = cfg.get("pid")
+    if not pid:
+        raise SystemExit("Config must include 'pid'.")
+    
     query_spec = cfg.get("query", None)
     if query_spec is None:
         SystemExit("Config must include 'query'.")
     
-    # Allow CLI overrides; fallback to config; else None (handled inside get_table_data)
-    start = args.start if args.start is not None else cfg.get("ref_start", None)
-    end = args.end if args.end is not None else cfg.get("ref_end", None)
+    start = args.start if args.start is not None else cfg.get("ref_start")
+    end = args.end if args.end is not None else cfg.get("ref_end")
 
     df = get_table_data(
-        pid=cfg["pid"],
+        pid=pid,
         query_spec=query_spec,
         ref_start=start,
-        ref_end=end
+        ref_end=end,
     )
 
     # Output handling

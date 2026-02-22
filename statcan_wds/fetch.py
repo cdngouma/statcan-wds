@@ -1,41 +1,52 @@
 import pandas as pd
 from datetime import date
-from typing import Optional
 import re
+
+from typing import Optional
+from urllib.parse import urlencode
+
 from .client import get, post 
 from .resolver import build_coordinates, resolve_vectors
 from .metadata import get_cube_metatdata
 from .errors import VectorDataPointError
 
+import logging
+logger = logging.getLogger(__name__)
+
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 # --- Internal Helpers ---
 
-def coordinates_to_index(dim_map, coordinate):
+def _validate_ref_date(value: Optional[str], field: str) -> None:
+    if value is None:
+        return
+    if not _ISO_DATE.match(value):
+        raise ValueError(f"{field} must be ISO 8601 YYYY-MM-DD, got: {value!r}")
+
+def _coordinates_to_index(dim_map, coordinate):
     """Maps a WDS coordinate string (1.1.2.0...) to human-readable dimension names."""
     coor_arr = coordinate.split(".")
     indexes = []
 
+    # precompute inverse maps once per call
+    inv = {
+        dim_name: {str(v): k for k, v in info["values"].items()}
+        for dim_name, info in dim_map.items()
+    }
+
     for dim_name, info in dim_map.items():
         pos = int(info["position"])
-        vals = info["values"]
-        
-        # Ensure the coordinate array is long enough for this dimension
         if pos > len(coor_arr):
             continue
-            
+
         coor_val = coor_arr[pos - 1]
-        
-        # Skip dimensions with '0' (not specified in this specific slice)
         if coor_val == "0":
             continue
-        
-        # Find the member name that matches the ID at this position
-        idx_val = next((name for name, mId in vals.items() if int(mId) == int(coor_val)), None)
-        
-        if idx_val:
-            indexes.append((dim_name, idx_val))
-    
+
+        label = inv[dim_name].get(coor_val)
+        if label:
+            indexes.append((dim_name, label))
+
     return dict(indexes)
 
 def _parse_wds_response(data, dim_map):
@@ -49,34 +60,36 @@ def _parse_wds_response(data, dim_map):
         
         obj = series["object"]
         # Use the coordinate provided in the response object
-        index = coordinates_to_index(dim_map, obj["coordinate"])
+        index = _coordinates_to_index(dim_map, obj["coordinate"])
 
         for pt in obj["vectorDataPoint"]:
             rows.append(index | {"REF_DATE": pt["refPer"], "VALUE": pt["value"]})
-    return rows
+    
+    return pd.DataFrame(rows)
 
 # --- Specialized Fetchers ---
 
 def _fetch_snapshot(pid, coordinates, dim_map):
-    """Internal: Uses the Cube-Coordinate endpoint."""
     payload = [{"productId": pid, "coordinate": c, "latestN": 1} for c in coordinates]
+    
     data = post("getDataFromCubePidCoordAndLatestNPeriods", payload)
+    
     return _parse_wds_response(data, dim_map)
 
 def _fetch_time_series(pid, coordinates, dim_map, metadata, ref_start, ref_end):
-    """Internal: Uses the Vector-Range endpoint."""
     vectors = resolve_vectors(pid, coordinates)
-    
-    vector_ids = ",".join(f'"{v}"' for v in vectors.keys())
+
     start = ref_start or metadata.get("cubeStartDate")
     end = ref_end or metadata.get("cubeEndDate")
 
-    query = (
-        f"getDataFromVectorByReferencePeriodRange"
-        f"?vectorIds={vector_ids}&startRefPeriod={start}&endReferencePeriod={end}"
-    )
+    params = urlencode({
+        "vectorIds": ",".join(str(v) for v in vectors.keys()),
+        "startRefPeriod": start,
+        "endReferencePeriod": end,
+    })
+
+    data = get(f"getDataFromVectorByReferencePeriodRange?{params}")
     
-    data = get(query)
     return _parse_wds_response(data, dim_map)
 
 # --- Public API ---
@@ -86,20 +99,24 @@ def get_table_data(pid, query_spec: dict, ref_start: Optional[str] = None, ref_e
     The main entry point. Automatically chooses between Vector (Time Series) 
     and Cube (Snapshot) endpoints based on the Product ID.
     """
+    _validate_ref_date(ref_start, "ref_start")
+    _validate_ref_date(ref_end, "ref_end")
+    
     metadata = get_cube_metatdata(pid)
     coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
     
     pid_str = str(pid)
 
     try:
-        # Route based on PID (Census tables start with 98)
-        if pid_str.startswith("98"):
-            results = _fetch_snapshot(pid, coordinates, dim_map)
-        else:
-            results = _fetch_time_series(pid, coordinates, dim_map, metadata, ref_start, ref_end)
+        df = _fetch_time_series(pid, coordinates, dim_map, metadata, ref_start, ref_end)
     except Exception as e:
         # Fallback for non-Census tables that might not have vectors for specific slices
-        print(f"Primary fetch method failed ({e}), attempting snapshot fallback...")
-        results = _fetch_snapshot(pid, coordinates, dim_map)
+        logger.info("Vector fetch failed (%s). Falling back to snapshot.", e)
+        df = _fetch_snapshot(pid, coordinates, dim_map)
 
-    return pd.DataFrame(results)
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError(
+            f"Internal error: expected DataFrame, got {type(df).__name__}"
+        )
+
+    return df

@@ -26,13 +26,13 @@ def inspect_dimensions(pid, metadata):
         }
     }
     """
+    dims = metadata.get("dimension")
+    if not dims:
+        raise MetadataError(f"No dimensions found in metadata for {pid}")
     return {
         dim["dimensionNameEn"]: {
             "position": dim["dimensionPositionId"],
-            "values": {
-                m["memberNameEn"]: m["memberId"]
-                for m in dim["member"]
-            }
+            "values": {m["memberNameEn"]: m["memberId"] for m in dim.get("member", [])},
         }
-        for dim in metadata["dimension"]
+        for dim in dims
     }

@@ -41,7 +41,7 @@ def expand_specs(query_spec=[]):
     ]
 
 
-def build_coordinates(pid, query_spec, metadata):
+def build_coordinates(pid, query_spec, metadata, *, allow_defaults: bool=False):
     """
     Map human-readable specs to WDS coordinate strings
     """
@@ -78,26 +78,22 @@ def build_coordinates(pid, query_spec, metadata):
 
 
 def resolve_vectors(pid, coordinates):
-    """
-    Resolve WDS coordinates to vectors IDs
-    """
     if not coordinates:
         raise InvalidCoordinateError("No coordinates provided")
     
-    payload = [
-        {"productId": pid, "coordinate": c}
-        for c in coordinates
-    ]
-
+    payload = [{"productId": pid, "coordinate": c} for c in coordinates]
     series = post("getSeriesInfoFromCubePidCoord", payload)
 
-    vec_map = {
-        s["object"]["vectorId"]: s["object"]["SeriesTitleEn"]
-        for s in series
-        if s["object"]["vectorId"] != "0"
-    }
+    vec_map = {}
+    for s in series:
+        if s.get("status") != "SUCCESS":
+            raise InvalidCoordinateError(f"Series info lookup failed: {s.get('object')}")
+        obj = s["object"]
+        vid = obj.get("vectorId")
+        if vid and vid != "0":
+            vec_map[str(vid)] = obj.get("SeriesTitleEn")
 
     if not vec_map:
-        raise InvalidCoordinateError(f"Could not find series info for coordinates: {coordinates}")
-    
+        raise InvalidCoordinateError("No vectors available for the provided coordinates")
+
     return vec_map
