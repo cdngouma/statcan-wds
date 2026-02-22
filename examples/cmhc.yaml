@@ -14,5 +14,5 @@ query:
     - "One bedroom units"
     - "Two bedroom units"
     - "Three bedroom units"
-start_ref_period: "2020-01-01"
-end_ref_period: "2025-12-31"
+ref_start: "2020-01-01"
+ref_end: "2025-12-31"
