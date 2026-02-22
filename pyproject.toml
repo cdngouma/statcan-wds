@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "statcan-wds"
-version = "0.1.0"
+version = "0.1.1"
 description = "Metadata-driven Python client for querying Statistics Canada WDS using human-readable dimensions"
 readme = "README.md"
 requires-python = ">=3.9"
