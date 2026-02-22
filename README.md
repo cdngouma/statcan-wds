@@ -7,55 +7,75 @@ Designed for data engineers and analysts who want reproducible, config-driven St
 StatCan's WDS API exposes data via high-dimensional cubes that must be queried using numeric *coordinates* and *vector IDs*. While powerful, this makes programmatic access error-prone and difficult to explore.
 
 This project provides a thin abstraction layer that:
-- inspects cube metadata
-- resolves human-readable dimension selections into valid WDS coordinates
-- maps coordinates to vector IDs
-- fetches time-series data into tidy DataFrames
+- Inspects cube metadata.
+- Resolves human-readable dimension selections into valid WDS coordinates.
+- Automatically determines if a table requires **Time-Series** (Vector) or **Snapshot** (Cube) retrieval logic.
+- Fetches data into tidy DataFrames with automatic label mapping.
 
-- No UI scraping. No hard-coded IDs.
+---
+## Installation
+### Standard Installation
+The easiest way to use statcan-wds in your project is to install it directly from GitHub:
 
-## Project structure
-```graphql
-statcan-wds/
-├── statcan_wds/
-│   ├── cli.py        # Command-line interface
-│   ├── client.py    # Raw WDS HTTP calls
-│   ├── metadata.py  # Cube metadata inspection
-│   ├── resolver.py  # Label → coordinate → vector resolution
-│   ├── fetch.py     # Data retrieval into DataFrames
-│   └── errors.py
-├── examples/
-│   ├── cmhc.yaml
-│   └── cpi_adjusted.yaml
-├── examples.ipynb   # Notebook usage examples
-├── pyproject.toml
-└── README.md
+```bash
+pip install git+https://github.com/cdngouma/statcan-wds.git
 ```
 
-## Installation (development)
-Install the project in editable mode:
+### Development Mode
+If you plan on contributing to the code or experimenting with the source, clone the repository and install it in editable mode:
+
 ```bash
+git clone https://github.com/cdngouma/statcan-wds.git
+cd statcan-wds
 pip install -e .
 ```
+---
+## Data Handling Logic
+### Time-Series vs. Census Snapshots
+The client automatically switches between two retrieval methods:
+- Time-Series (Vector ID): Used for standard tables (CPI, GDP) to fetch historical ranges.
+- Snapshots (Cube-Coordinate): Used for Census data (PIDs starting with 98) or any data slice lacking a Vector ID.
 
-This registers the `statcan-wds` CLI while keeping the code linked to your working directory, which is useful for development, experimentation, and review.
+### Reference Period Logic
+Format: All dates must follow the `ISO 8601` format: `YYYY-MM-DD`.
+Missing Dates:
+- `ref_start` only -> Fetches from start date to latest date in the table.
+- `ref_end` only -> Fetches a single point for that date.
+- None provided -> Fetches the entire range available in the table metadata.
 
-The command assumes you are already working inside a Python environment (e.g. `venv`, `conda`, Docker, etc.).
+---
+## Python API usage
+The library can be used directly in scripts or Jupyter notebooks:
 
+```python
+from statcan_wds.fetch import get_table_data
+
+df = get_table_data(
+    pid="18100006",
+    query_spec=[
+        {"Geography": ["Canada", "Quebec"]},
+        {"Statistics": "Consumer Price Index"}
+    ],
+    ref_start="2023-01-01" # Automatically fetches up to latest date
+)
+```
+The function returns a tidy pandas.DataFrame with:
+- One column per selected dimension (using human-readable labels).
+- `REF_DATE`
+- `VALUE`
+
+---
 ## Command-line usage
-List available dimensions (with positions):
 ### Preview cube dimensions
 ```bash
 statcan-wds dims 18100006
 ```
-
 Example output:
 ```bash
  1. Geography
  2. Statistics
  3. North American Product Classification System (NAPCS)
 ```
-
 ### Inspect dimension members
 By dimension name:
 ```bash
@@ -79,63 +99,43 @@ statcan-wds dims-json 18100006 --out dims_18100006.json
 ```
 
 ### Fetching data with a config file
-Data extraction is driven by a YAML or JSON config, defining:
-- the StatCan table (`pid`)
-- the dimension selections (`query`)
-- optional reference-period bounds
-
-Example YAML
+Create a `config.yaml`:
 ```yaml
 pid: "18100006"
 query:
   - Geography: ["Canada", "Quebec"]
   - "North American Product Classification System (NAPCS)": "All merchandise"
-start_ref_period: "2022-01-01"
-end_ref_period: "2024-12-31"
+ref_start: "2022-01-01"
 ```
 
-### Fetch from the CLI
+Run the fetch:
 ```bash
-statcan-wds fetch examples/cpi_adjusted.yaml --out data/cpi.parquet
+statcan-wds fetch config.yaml --out data/results.parquet
 ```
-
 Supported outputs:
 - `parquet`
 - `csv`
 
-If no output path is provided, a preview is printed to stdout.
-
-## Python API usage
-The library can also be used directly from Python or notebooks:
-```python
-from statcan_wds.fetch import get_table_data
-
-df = get_table_data(
-    pid="18100006",
-    query_spec=[
-        {"Geography": ["Canada", "Quebec"]},
-        {"Statistics": "Consumer Price Index"}
-    ],
-    start_ref_period="2023-01-01",
-    end_ref_period="2024-12-31",
-)
+---
+## Project structure
+```plaintext
+statcan-wds/
+├── statcan_wds/
+│   ├── cli.py        # Command-line interface
+│   ├── client.py    # Raw WDS HTTP calls
+│   ├── metadata.py  # Cube metadata inspection
+│   ├── resolver.py  # Label -> coordinate -> vector resolution
+│   ├── fetch.py     # Data retrieval into DataFrames
+│   └── errors.py
+├── examples/
+│   ├── cmhc.yaml
+│   └── cpi_adjusted.yaml
+├── examples.ipynb   # Notebook usage examples
+├── pyproject.toml
+└── README.md
 ```
 
-The function returns a tidy pandas.DataFrame with:
-- one column per selected dimension
-- `REF_DATE`
-- `VALUE`
+---
 
-## Reference period handling
-At least one of `start_ref_period` or `end_ref_period` must be specified.
-
-Dates must be in `YYYY-MM-DD` format.
-
-## Non-goals
-This project intentionally does not:
-- manage credentials or secrets
-- perform transformations or analytics
-- cache data or metadata
-- orchestrate workflows (Airflow, Dagster, etc.)
-
-It focuses strictly on correct, reproducible data ingestion.
+## Official Web Data Service (WDS) User Guide
+[Documentation](https://www.statcan.gc.ca/en/developers/wds/user-guide)
