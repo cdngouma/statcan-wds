@@ -2,91 +2,104 @@ import pandas as pd
 from datetime import date
 from typing import Optional
 import re
-from .client import get
+from .client import get, post 
 from .resolver import build_coordinates, resolve_vectors
 from .metadata import get_cube_metatdata
 from .errors import VectorDataPointError
 
-
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# --- Internal Helpers ---
 
-def _normalize_ref_period_range(ref_start: Optional[str], ref_end: Optional[str]):
-    if ref_start is None and ref_end is None:
-        raise ValueError("Both start_ref_period and end_ref_period are None. Provide at least one.")
+def coordinates_to_index(dim_map, coordinate):
+    """Maps a WDS coordinate string (1.1.2.0...) to human-readable dimension names."""
+    coor_arr = coordinate.split(".")
+    indexes = []
+
+    for dim_name, info in dim_map.items():
+        pos = int(info["position"])
+        vals = info["values"]
+        
+        # Ensure the coordinate array is long enough for this dimension
+        if pos > len(coor_arr):
+            continue
+            
+        coor_val = coor_arr[pos - 1]
+        
+        # Skip dimensions with '0' (not specified in this specific slice)
+        if coor_val == "0":
+            continue
+        
+        # Find the member name that matches the ID at this position
+        idx_val = next((name for name, mId in vals.items() if int(mId) == int(coor_val)), None)
+        
+        if idx_val:
+            indexes.append((dim_name, idx_val))
     
-    if ref_start is None:
-        ref_start = ref_end
-    
-    if ref_end is None:
-        ref_end = date.today().isoformat()
+    return dict(indexes)
 
-    assert ref_start is not None and ref_end is not None
-    
-    if not _ISO_DATE.match(ref_start):
-        raise ValueError(f"start_ref_period must be YYYY-MM-DD, got: {ref_start}")
-    
-    if not _ISO_DATE.match(ref_end):
-        raise ValueError(f"end_ref_period must be YYYY-MM-DD, got: {ref_end}")
+def _parse_wds_response(data, dim_map):
+    """Standardizes the conversion of WDS JSON responses into a list of row dicts."""
+    rows = []
+    for series in data:
+        if series["status"] == "FAILED":
+            err_obj = series.get("object", {})
+            msg = f"API Error: {series['status']} (Code: {err_obj.get('responseStatusCode', 'Unknown')})"
+            raise VectorDataPointError(msg)
+        
+        obj = series["object"]
+        # Use the coordinate provided in the response object
+        index = coordinates_to_index(dim_map, obj["coordinate"])
 
-    if ref_start > ref_end:
-        raise ValueError(f"start_ref_period ({ref_start}) is after end_ref_period ({ref_end})")
+        for pt in obj["vectorDataPoint"]:
+            rows.append(index | {"REF_DATE": pt["refPer"], "VALUE": pt["value"]})
+    return rows
 
-    return ref_start, ref_end
+# --- Specialized Fetchers ---
 
+def _fetch_snapshot(pid, coordinates, dim_map):
+    """Internal: Uses the Cube-Coordinate endpoint."""
+    payload = [{"productId": pid, "coordinate": c, "latestN": 1} for c in coordinates]
+    data = post("getDataFromCubePidCoordAndLatestNPeriods", payload)
+    return _parse_wds_response(data, dim_map)
 
-def get_table_data(
-    pid, 
-    query_spec: dict, 
-    ref_start: Optional[str] = None,
-    ref_end: Optional[str] = None
-):
-    """
-    Fetch multiple StatCan series into a tidy DataFrame
-    """
-    metadata = get_cube_metatdata(pid)
-    coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
+def _fetch_time_series(pid, coordinates, dim_map, metadata, ref_start, ref_end):
+    """Internal: Uses the Vector-Range endpoint."""
     vectors = resolve_vectors(pid, coordinates)
-
+    
     vector_ids = ",".join(f'"{v}"' for v in vectors.keys())
-
-    ref_start = ref_start if ref_start else metadata["cubeStartDate"]
-    ref_end = ref_end if ref_end else metadata["cubeEndDate"]
+    start = ref_start or metadata.get("cubeStartDate")
+    end = ref_end or metadata.get("cubeEndDate")
 
     query = (
         f"getDataFromVectorByReferencePeriodRange"
-        f"?vectorIds={vector_ids}"
-        f"&startRefPeriod={ref_start}"
-        f"&endReferencePeriod={ref_end}"
+        f"?vectorIds={vector_ids}&startRefPeriod={start}&endReferencePeriod={end}"
     )
-
+    
     data = get(query)
+    return _parse_wds_response(data, dim_map)
 
-    final_df = []
+# --- Public API ---
 
-    for series in data:
-        if series["status"] == "FAILED":
-            raise VectorDataPointError(
-                "Failed to retrieve vector data points: "
-                f"responseStatusCode: {series['object']['responseStatusCode']}"
-            )
-        
-        obj = series["object"]
-        v_id = obj["vectorId"]
-        
-        index_cols = list(dim_map.keys())
-        index_cols.sort(key=lambda c: dim_map.get(c, float("inf")))
+def get_table_data(pid, query_spec: dict, ref_start: Optional[str] = None, ref_end: Optional[str] = None):
+    """
+    The main entry point. Automatically chooses between Vector (Time Series) 
+    and Cube (Snapshot) endpoints based on the Product ID.
+    """
+    metadata = get_cube_metatdata(pid)
+    coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
+    
+    pid_str = str(pid)
 
-        index_vals = vectors[v_id].split(";")
-        index = dict(zip(index_cols, index_vals))
+    try:
+        # Route based on PID (Census tables start with 98)
+        if pid_str.startswith("98"):
+            results = _fetch_snapshot(pid, coordinates, dim_map)
+        else:
+            results = _fetch_time_series(pid, coordinates, dim_map, metadata, ref_start, ref_end)
+    except Exception as e:
+        # Fallback for non-Census tables that might not have vectors for specific slices
+        print(f"Primary fetch method failed ({e}), attempting snapshot fallback...")
+        results = _fetch_snapshot(pid, coordinates, dim_map)
 
-        for pt in obj["vectorDataPoint"]:
-            final_df.append(
-                index
-                | {
-                    "REF_DATE": pt["refPer"], 
-                    "VALUE": pt["value"]
-                }
-            )
-
-    return pd.DataFrame(final_df)
+    return pd.DataFrame(results)

@@ -72,9 +72,9 @@ def build_coordinates(pid, query_spec, metadata):
         
         coordinates.append(".".join(slots))
     
-    dim_map = {k: int(v["position"]) for k,v in dims.items()}
+    #dim_map = {k: int(v["position"]) for k,v in dims.items()}
 
-    return coordinates, dim_map
+    return coordinates, dims
 
 
 def resolve_vectors(pid, coordinates):
@@ -94,9 +94,10 @@ def resolve_vectors(pid, coordinates):
     vec_map = {
         s["object"]["vectorId"]: s["object"]["SeriesTitleEn"]
         for s in series
+        if s["object"]["vectorId"] != "0"
     }
 
     if not vec_map:
-        raise InvalidCoordinateError(f"Invalid coordinate combinations: {coordinates}")
+        raise InvalidCoordinateError(f"Could not find series info for coordinates: {coordinates}")
     
     return vec_map
