@@ -55,8 +55,10 @@ def _parse_wds_response(data, dim_map):
     for series in data:
         if series["status"] == "FAILED":
             err_obj = series.get("object", {})
-            msg = f"API Error: {series['status']} (Code: {err_obj.get('responseStatusCode', 'Unknown')})"
-            raise VectorDataPointError(msg)
+            msg = (f"Failed to retrieve data point for coordinate: {err_obj.get('coordinate')}"
+                   f"(Code: {err_obj.get('responseStatusCode')})")
+            logger.info(msg)
+            continue
         
         obj = series["object"]
         # Use the coordinate provided in the response object
