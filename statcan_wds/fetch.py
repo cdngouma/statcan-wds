@@ -1,19 +1,30 @@
 import pandas as pd
 from datetime import date
 import re
-
+import logging
 from typing import Optional
 from urllib.parse import urlencode
+from functools import lru_cache  # Added for caching
 
 from .client import get, post 
 from .resolver import build_coordinates, resolve_vectors
 from .metadata import get_cube_metatdata
 from .errors import VectorDataPointError
 
-import logging
 logger = logging.getLogger(__name__)
 
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# --- Caching Wrapper ---
+
+@lru_cache(maxsize=32)
+def _get_cached_metadata(pid: str):
+    """
+    Fetch and cache cube metadata. 
+    The cache persists for the lifetime of the python process.
+    """
+    logger.debug("Fetching fresh metadata for PID: %s", pid)
+    return get_cube_metatdata(pid)
 
 # --- Internal Helpers ---
 
@@ -104,7 +115,8 @@ def get_table_data(pid, query_spec: dict, ref_start: Optional[str] = None, ref_e
     _validate_ref_date(ref_start, "ref_start")
     _validate_ref_date(ref_end, "ref_end")
     
-    metadata = get_cube_metatdata(pid)
+    # Use the cached version instead of calling get_cube_metatdata directly
+    metadata = _get_cached_metadata(str(pid))
     coordinates, dim_map = build_coordinates(pid, query_spec, metadata)
     
     pid_str = str(pid)
